@@ -713,8 +713,9 @@ do
 
     local ok, err = kong.db:connect()
     if not ok then
+      kong.db:close()
+
       if recurse and tries < 6 then
-        kong.db:setkeepalive()
         log(NOTICE,  "could not connect database: " .. err)
         sleep(0.01 * tries * tries)
         return build_router(current_version, recurse, tries + 1)
@@ -750,8 +751,9 @@ do
           return build_router(current_version, recurse, tries)
         end
 
+        kong.db:close()
+
         if recurse and tries < 6 then
-          kong.db:setkeepalive()
           log(NOTICE,  "could not load routes: " .. err)
           sleep(0.01 * tries * tries)
           return build_router(current_version, recurse, tries + 1)
@@ -775,8 +777,9 @@ do
             return build_router(current_version, recurse, tries)
           end
 
+          kong.db:close()
+
           if recurse and tries < 6 then
-            kong.db:setkeepalive()
             log(NOTICE,  "could not find service for route (", route.id, "): ", err)
             sleep(0.01 * tries * tries)
             return build_router(current_version, recurse, tries + 1)
@@ -827,6 +830,7 @@ do
 
     local new_router, err = Router.new(routes)
     if not new_router then
+      kong.db:close()
       return nil, "could not create router: " .. err
     end
 
@@ -854,6 +858,10 @@ do
       end
     end
 
+    if version ~= "init" then
+      kong.db.setkeepalive()
+    end
+
     return true
   end
 
@@ -867,8 +875,9 @@ do
 
     local ok, err = kong.db:connect()
     if not ok then
+      kong.db:close()
+
       if recurse and tries < 6 then
-        kong.db:setkeepalive()
         log(NOTICE,  "could not connect database: " .. err)
         sleep(0.01 * tries * tries)
         return build_plugins(current_version, recurse, tries + 1)
@@ -924,8 +933,9 @@ do
           return build_plugins(current_version)
         end
 
+        kong.db:close()
+
         if recurse and tries < 6 then
-          kong.db:setkeepalive()
           log(NOTICE,  "could not load plugins: " .. err)
           sleep(0.01 * tries * tries)
           return build_plugins(current_version, recurse, tries + 1)
@@ -999,6 +1009,10 @@ do
         log(DEBUG, "rebuilding plugins on worker #", WORKER_ID)
         return build_plugins(current_version)
       end
+    end
+
+    if version ~= "init" then
+      kong.db.setkeepalive()
     end
 
     return true
@@ -1173,8 +1187,8 @@ return {
         end
 
       else
-        build_router("init")
-        build_plugins("init")
+        assert(build_router("init"))
+        assert(build_plugins("init"))
       end
     end
   },
