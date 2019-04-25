@@ -223,6 +223,18 @@ local function cache_services()
 end
 
 
+local function get_services()
+  local services = {}
+  for service, err in kong.db.services:each(1000) do
+    if err then
+      return nil, err
+    end
+    services[service.id] = service
+  end
+  return services
+end
+
+
 local function start_timers()
   -- initialize balancers for active healthchecks
   timer_at(0, function()
@@ -658,13 +670,19 @@ do
     return service, err
   end
 
-  local function get_service_for_route(route)
+  local function get_service_for_route(route, services)
     local service_pk = route.service
     if not service_pk then
       return nil
     end
 
-    local service, err = load_service(service_pk)
+    local service, err
+    if services then
+      service = services[service_pk.id]
+    else
+      service, err = load_service(service_pk)
+    end
+
     if not service then
       if err then
         return nil, "could not find service for route (" .. route.id .. "): " ..
@@ -686,22 +704,9 @@ do
   end
 
   build_router = function(version, recurse, tries)
-    local phase = get_phase()
-    if version == "init" then
-      if phase == "init" then
-        log(DEBUG, "initialising router...")
-      else
-        log(DEBUG, "initialising router on worker #", WORKER_ID, "...")
-      end
-
-    else
-      log(DEBUG, "rebuilding router on worker #", WORKER_ID, "...")
-    end
-
     tries = tries or 1
 
-    local current_version
-    current_version = get_version("router")
+    local current_version = get_version("router")
     if version ~= current_version then
       return build_router(current_version, recurse, tries)
     end
@@ -717,6 +722,24 @@ do
 
       return nil, err
     end
+
+    local services
+    local phase = get_phase()
+    if version == "init" then
+      if phase == "init" then
+        log(DEBUG, "initialising router...")
+        services, err = get_services()
+        if not services then
+          return nil, err
+        end
+
+      else
+        log(DEBUG, "initialising router on worker #", WORKER_ID, "...")
+      end
+    else
+      log(DEBUG, "rebuilding router on worker #", WORKER_ID, "...")
+    end
+
 
     local routes, i, counter = {}, 0, 0
 
@@ -745,7 +768,7 @@ do
       end
 
       if should_process_route(route) then
-        local service, err = get_service_for_route(route)
+        local service, err = get_service_for_route(route, services)
         if err then
           current_version = get_version("router")
           if version ~= current_version then
@@ -835,22 +858,9 @@ do
   end
 
   build_plugins = function(version, recurse, tries)
-    local phase = get_phase()
-    if version == "init" then
-      if phase == "init" then
-        log(DEBUG, "initialising plugins...")
-      else
-        log(DEBUG, "initialising plugins on worker #", WORKER_ID, "...")
-      end
-
-    else
-      log(DEBUG, "rebuilding plugins on worker #", WORKER_ID, "...")
-    end
-
     tries = tries or 1
 
-    local current_version
-    current_version = get_version("plugins")
+    local current_version = get_version("plugins")
     if version ~= current_version then
       return build_plugins(current_version)
     end
@@ -865,6 +875,18 @@ do
       end
 
       return nil, err
+    end
+
+    local phase = get_phase()
+    if version == "init" then
+      if phase == "init" then
+        log(DEBUG, "initialising plugins...")
+      else
+        log(DEBUG, "initialising plugins on worker #", WORKER_ID, "...")
+      end
+
+    else
+      log(DEBUG, "rebuilding plugins on worker #", WORKER_ID, "...")
     end
 
     local new_plugins = {
